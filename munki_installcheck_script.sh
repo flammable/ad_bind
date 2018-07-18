@@ -1,27 +1,40 @@
-#!/bin/sh
+#!/bin/bash
+
+dsconfigad="/usr/sbin/dsconfigad"
+echo="/bin/echo"
+grep="/usr/bin/grep"
+id="/usr/bin/id"
+nc="/usr/bin/nc"
+sed="/usr/bin/sed"
 
 # The Domain we're supposed to be on
-DOMAIN="yourorg.com"
+domain="yourorg.com"
 
 # A valid user in AD
-ADUSER="useraccount"
+aduser="useraccount"
+
+# Is the AD server reachable?
+ad_server_check=$(${nc} -G 3 -z ${domain} 389 &> /dev/null)$?
 
 # The domain from dsconfigad
-ACTUAL_DOMAIN=`/usr/sbin/dsconfigad -show | /usr/bin/grep -i "Active Directory Domain" | /usr/bin/sed -n 's/[^.]*= //p'`
+actual_domain=$(${dsconfigad} -show | ${grep} -i "Active Directory Domain" | ${sed} -n 's/[^.]*= //p')
 
 # Is the user in AD?
-ADUSER_RECOGNIZED=$(/usr/bin/id ${ADUSER} > /dev/null)$?
+aduser_recognized=$(${id} ${aduser} > /dev/null)$?
 
-if [ "$ACTUAL_DOMAIN" = "$DOMAIN" ]
-    then
-	  	if [ "$ADUSER_RECOGNIZED" -eq 0 ]
-    	then
-        	# Everything's ok, no need to install
-        	exit 1
-   	    else
-	    	exit 0
-        fi
-else
-    # Domain isn't being returned from dsconfigad, need to install
-    exit 0
+if [[ "${ad_server_check}" -eq 1 ]]; then
+	${echo} "AD server is unreachable"
+	exit 1
 fi
+
+if [[ "${actual_domain}" != "${domain}" ]]; then
+	${echo} "Bound domain doesn't match AD domain"
+	exit 0
+fi
+
+if [[ "${aduser_recognized}" -eq 1 ]]; then
+	${echo} "AD user check failed"
+	exit 0
+fi
+
+exit 1
