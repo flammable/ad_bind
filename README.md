@@ -6,6 +6,8 @@ These are all of the components needed to bind a Mac to Active Directory using M
 
 Additionally, the included installcheck_script will allow Munki to detect if the binding is broken, and will prompt the user to fix it by reinstalling through Managed Software Center.
 
+I wrote more about this on [my blog](https://mikesolin.com/2018/04/14/binding-macs-to-ad-using-munkis-configuration-profile-support/).
+
 ### Requirements
 
 * An Active Directory Server
