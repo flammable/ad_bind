@@ -1,0 +1,161 @@
+#!/bin/sh
+
+awk="/usr/bin/awk"
+cut="/usr/bin/cut"
+dscl="/usr/bin/dscl"
+dsconfigad="/usr/sbin/dsconfigad"
+dseditgroup="/usr/sbin/dseditgroup"
+echo="/bin/echo"
+expr="/bin/expr"
+egrep="/usr/bin/egrep"
+grep="/usr/bin/grep"
+head="/usr/bin/head"
+host="/usr/bin/host"
+more="/usr/bin/more"
+netstat="/usr/sbin/netstat"
+ping="/sbin/ping"
+rm="/bin/rm"
+sed="/usr/bin/sed"
+sleep="/bin/sleep"
+system_profiler="/usr/sbin/system_profiler"
+
+# Script config
+
+AD_DOMAIN="ad.your.org"
+COMPUTER_ID=$(${system_profiler} SPHardwareDataType | ${awk} '/Serial/ {print $4}')
+COMPUTERS_OU="OU=Macs,OU=Devices,DC=ad,DC=your,DC=org"
+ADMIN_LOGIN="bindingaccount"
+ADMIN_PWD="bindingpassword"
+MOBILE="disable"
+MOBILE_CONFIRM="disable"
+LOCAL_HOME="enable"
+USE_UNC_PATHS="disable"
+UNC_PATHS_PROTOCOL="smb"
+PACKET_SIGN="disable"
+PACKET_ENCRYPT="disable"
+PASSWORD_INTERVAL="14"
+ADMIN_GROUPS=""
+
+# UID_MAPPING=
+# GID_MAPPING=
+# GGID_MAPPING==
+
+# disable history characters
+histchars=
+
+# AD can only use a 15 character name
+COMPUTER_ID=$(${echo} ${COMPUTER_ID} | ${cut} -c1-15)
+
+# Try to bind the computer
+ATTEMPTS=0
+MAX_ATTEMPTS=1
+SUCCESS=
+while [ -z "${SUCCESS}" ]
+do
+  if [ ${ATTEMPTS} -le ${MAX_ATTEMPTS} ]
+  then
+    ${echo} "Binding computer to domain ${AD_DOMAIN}..." 2>&1 
+    ${dsconfigad} -add "${AD_DOMAIN}" -computer "${COMPUTER_ID}" -ou "${COMPUTERS_OU}" -username "${ADMIN_LOGIN}" -password "${ADMIN_PWD}" -force 2>&1
+    IS_BOUND=$(${dsconfigad} -show | ${grep} "Active Directory Domain")
+    if [ -n "${IS_BOUND}" ]
+    then
+      SUCCESS="YES"
+    else
+      ${echo} "An error occured while trying to bind this computer to AD, new attempt in 10 seconds..." 2>&1
+      ${sleep} 10
+      ATTEMPTS=$(${expr} ${ATTEMPTS} + 1)
+    fi
+  else
+    ${echo} "AD binding failed (${MAX_ATTEMPTS} attempts)!" 2>&1
+    SUCCESS="NO"
+  fi
+done
+
+if [ "${SUCCESS}" = "YES" ]
+then
+  # Update AD plugin options
+  ${echo} "Setting AD plugin options..." 2>&1
+  ${dsconfigad} -mobile ${MOBILE} 2>&1
+  ${sleep} 1
+  ${dsconfigad} -mobileconfirm ${MOBILE_CONFIRM} 2>&1 
+  ${sleep} 1
+  ${dsconfigad} -localhome ${LOCAL_HOME} 2>&1
+  ${sleep} 1
+  ${dsconfigad} -useuncpath ${USE_UNC_PATHS} 2>&1
+  ${sleep} 1
+  ${dsconfigad} -protocol ${UNC_PATHS_PROTOCOL} 2>&1
+  ${sleep} 1
+  ${dsconfigad} -packetsign ${PACKET_SIGN} 2>&1
+  ${sleep} 1
+  ${dsconfigad} -packetencrypt ${PACKET_ENCRYPT} 2>&1
+  ${sleep} 1
+  ${dsconfigad} -passinterval ${PASSWORD_INTERVAL} 2>&1
+  if [ -n "${ADMIN_GROUPS}" ]
+  then
+    ${sleep} 1
+    ${dsconfigad} -groups "${ADMIN_GROUPS}" 2>&1
+  fi
+  ${sleep} 1
+
+  if [ -n "${AUTH_DOMAIN}" ] && [ "${AUTH_DOMAIN}" != 'All Domains' ]
+  then
+    ${dsconfigad} -alldomains disable 2>&1
+  else
+    ${dsconfigad} -alldomains enable 2>&1
+  fi
+  AD_SEARCH_PATH=$(${dscl} /Search -read / CSPSearchPath | ${grep} "Active Directory" | ${sed} 's/^ *//' | ${sed} 's/ *$//')
+  if [ -n "${AD_SEARCH_PATH}" ]
+  then
+    ${echo} "Deleting '${AD_SEARCH_PATH}' from authentication search path..." 2>&1
+    ${dscl} localhost -delete /Search CSPSearchPath "${AD_SEARCH_PATH}" 2>/dev/null
+    ${echo} "Deleting '${AD_SEARCH_PATH}' from contacts search path..." 2>&1
+    ${dscl} localhost -delete /Contact CSPSearchPath "${AD_SEARCH_PATH}" 2>/dev/null
+  fi
+  ${dscl} localhost -create /Search SearchPolicy CSPSearchPath 2>&1
+  ${dscl} localhost -create /Contact SearchPolicy CSPSearchPath 2>&1
+  AD_DOMAIN_NODE=$(${dscl} localhost -list "/Active Directory" | ${head} -n 1)
+  if [ "${AD_DOMAIN_NODE}" = "All Domains" ]
+  then
+    AD_SEARCH_PATH="/Active Directory/All Domains"
+  elif [ -n "${AUTH_DOMAIN}" ] && [ "${AUTH_DOMAIN}" != 'All Domains' ]
+  then
+    AD_SEARCH_PATH="/Active Directory/${AD_DOMAIN_NODE}/${AUTH_DOMAIN}"
+  else
+    AD_SEARCH_PATH="/Active Directory/${AD_DOMAIN_NODE}/All Domains"
+  fi
+  ${echo} "Adding '${AD_SEARCH_PATH}' to authentication search path..." 2>&1
+  ${dscl} localhost -append /Search CSPSearchPath "${AD_SEARCH_PATH}"
+  ${echo} "Adding '${AD_SEARCH_PATH}' to contacts search path..." 2>&1
+  ${dscl} localhost -append /Contact CSPSearchPath "${AD_SEARCH_PATH}"
+
+  if [ -n "${UID_MAPPING}" ]
+  then
+    ${sleep} 1
+    ${dsconfigad} -uid "${UID_MAPPING}" 2>&1
+  fi
+  if [ -n "${GID_MAPPING}" ]
+  then
+    ${sleep} 1
+    ${dsconfigad} -gid "${GID_MAPPING}" 2>&1
+  fi
+  if [ -n "${GGID_MAPPING}" ]
+  then
+    ${sleep} 1
+    ${dsconfigad} -ggid "${GGID_MAPPING}" 2>&1
+  fi
+
+  GROUP_MEMBERS=$(${dscl} /Local/Default -read /Groups/com.apple.access_loginwindow GroupMembers 2>/dev/null)
+  NESTED_GROUPS=$(${dscl} /Local/Default -read /Groups/com.apple.access_loginwindow NestedGroups 2>/dev/null)
+  if [ -z "${GROUP_MEMBERS}" ] && [ -z "${NESTED_GROUPS}" ]
+  then
+    ${echo} "Enabling network users login..." 2>&1
+    ${dseditgroup} -o edit -n /Local/Default -a netaccounts -t group com.apple.access_loginwindow 2>/dev/null
+  fi
+
+  if [ "${SUCCESS}" = "YES" ]
+  then
+    exit 0
+  fi
+fi
+
+exit 1

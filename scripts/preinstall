@@ -1,0 +1,36 @@
+#!/bin/bash
+
+dsconfigad="/usr/sbin/dsconfigad"
+nc="/usr/bin/nc"
+sntp="/usr/bin/sntp"
+systemsetup="/usr/sbin/systemsetup"
+
+bootstrap_file="/Users/Shared/.com.googlecode.munki.checkandinstallatstartup"
+
+ADMIN_LOGIN="foo"
+ADMIN_PWD="bar"
+
+# if we're not bootstrapping, set the time
+if [ ! -e ${bootstrap_file} ]; then
+
+# In the future, synchronize the date/time automatically
+${systemsetup} -setusingnetworktime on
+
+# Local Time Server
+time_server="ntp.your.org"
+
+# Is the time server reachable?
+time_server_check=$(${nc} -z -w 3 -u ${time_server} 121 &> /dev/null)$?
+
+# If the time server is reachable, sync the date/time
+if [[ "${time_server_check}" -eq 0 ]]; then
+ ${sntp} -sS ${time_server}
+fi
+
+fi
+
+# forcibly remove from AD
+${dsconfigad} -remove -username "${ADMIN_LOGIN}" -password "${ADMIN_PWD}" 2>&1
+${dsconfigad} -force -remove -u "${ADMIN_LOGIN}" -p "${ADMIN_PWD}" 2>&1
+
+exit 0
