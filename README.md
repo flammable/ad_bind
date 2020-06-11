@@ -14,6 +14,7 @@ I wrote more about this on [my blog](https://mikesolin.com/2018/04/14/binding-ma
 
 * An Active Directory Server
 * Munki
+* [munkipkg](https://github.com/munki/munki-pkg)
 * I've tested this with macOS 10.14 and 10.15, but it should work with any recent version of the macOS
 
 ### Instructions
